@@ -12,20 +12,21 @@ enum class TokenType
     GOTO, LABEL,
     IF, ELSE,
     READ, WRITE,
+    WHILE,
     AND, OR, NOT,
-    START, FINAL, //14
+    START, FINAL, //15
 
     SEMICOLON, COLON, POINT, COMMA,
     ASSIGN,
     EQUAL, LESS, GREATER, NEQ, LEQ, GEQ,
     LEFT_BRACKET, RIGHT_BRACKET,
-    BEGIN, END, //29
+    BEGIN, END, //30
 
     PLUS, MINUS, MULTIPLY, DIVIDE,
 
-    NUMBER,     //34
-    IDENTIFIER, //35
-    STRING_CONST, //36
+    NUMBER,     //35
+    IDENTIFIER, //36
+    STRING_CONST, //37
     POLIZ_LABEL,
     POLIZ_ADDRESS,
     POLIZ_GO,
@@ -206,12 +207,12 @@ public:
 };
 
 std::string Scanner::serviceWordTable[] = {"not_indexed", "int", "string", "bool", "goto", "label", "if", "else",
-                                           "read", "write", "and", "or", "not", "program"};
+                                           "read", "write", "while", "and", "or", "not", "program"};
 
 std::string Scanner::delimiterTable[] = {"@", ";", ":", ".", ",", "=", "==", "<", ">", "!=", "<=",
                                          ">=", "(", ")", "{", "}", "+", "-", "*", "/"};
 
-const int serviceWordAmount = 14, delimiterAmount = 20;
+const int serviceWordAmount = 15, delimiterAmount = 20;
 
 Token Scanner::getToken()
 {
@@ -372,6 +373,303 @@ Token Scanner::getToken()
         }
     }
 }
+
+class Parser
+{
+private:
+    Token m_token;
+    TokenType m_tokenType;
+    int m_value;
+    Scanner m_scanner;
+
+    void getToken()
+    {
+        m_token = m_scanner.getToken();
+        m_tokenType = m_token.getType();
+        m_value = m_token.getValue();
+    }
+
+    void checkToken(TokenType a_expectedType)
+    {
+        if(m_tokenType != a_expectedType)
+        {
+            throw std::runtime_error("[Parser]: invalid type of token!");
+        }
+    }
+
+    void getToken(TokenType a_expectedType)
+    {
+        getToken();
+        checkToken(a_expectedType);
+    }
+
+    void value()
+    {
+        if (m_tokenType == TokenType::IDENTIFIER)
+        {
+            getToken();
+        }
+        else
+        {
+            constant();
+            getToken();
+        }
+    }
+
+    void multiplierOperand()
+    {
+        while (m_tokenType == TokenType::NOT)
+        {
+            getToken();
+        }
+
+        while (m_tokenType == TokenType::PLUS || m_tokenType == TokenType::MINUS)
+        {
+            getToken();
+        }
+
+        if (m_tokenType == TokenType::LEFT_BRACKET)
+        {
+            getToken();
+            expression();
+
+            checkToken(TokenType::RIGHT_BRACKET);
+
+            getToken();
+        }
+        else
+        {
+            value();
+        }
+
+    }
+
+    void termOperand()
+    {
+        multiplierOperand();
+
+        while (m_tokenType == TokenType::MULTIPLY || m_tokenType == TokenType::DIVIDE)
+        {
+            getToken();
+            multiplierOperand();
+        }
+    }
+
+    void compareOperand()
+    {
+        termOperand();
+
+        while (m_tokenType == TokenType::PLUS || m_tokenType == TokenType::MINUS)
+        {
+            getToken();
+            termOperand();
+        }
+    }
+
+    void andOperand()
+    {
+        compareOperand();
+
+        bool isCompareOperand = m_tokenType >= TokenType::EQUAL &&
+                                m_tokenType <= TokenType::GEQ;
+
+        if (isCompareOperand)
+        {
+            getToken();
+            compareOperand();
+        }
+    }
+
+    void orOperand()
+    {
+        andOperand();
+
+        while (m_tokenType == TokenType::AND)
+        {
+            getToken();
+            andOperand();
+        }
+    }
+
+    void assignOperand()
+    {
+        orOperand();
+
+        while (m_tokenType == TokenType::OR)
+        {
+            getToken();
+            orOperand();
+        }
+    }
+
+    void expression()
+    {
+        assignOperand();
+
+        while (m_tokenType == TokenType::ASSIGN)
+        {
+            getToken();
+            assignOperand();
+        }
+    }
+
+    void statement()
+    {
+        if (m_tokenType == TokenType::READ)
+        {
+            getToken(TokenType::LEFT_BRACKET);
+            {
+                getToken(TokenType::IDENTIFIER);
+            }
+            getToken(TokenType::RIGHT_BRACKET);
+
+            getToken(TokenType::SEMICOLON);
+        }
+        else if (m_tokenType == TokenType::WRITE)
+        {
+            getToken(TokenType::LEFT_BRACKET);
+
+            do
+            {
+                getToken();
+                expression();
+            }
+            while (m_tokenType == TokenType::COMMA);
+
+            checkToken(TokenType::RIGHT_BRACKET);
+
+            getToken(TokenType::SEMICOLON);
+        }
+        else if (m_tokenType == TokenType::WHILE)
+        {
+            getToken(TokenType::LEFT_BRACKET);
+            {
+                getToken();
+                expression();
+            }
+            checkToken(TokenType::RIGHT_BRACKET);
+            {
+                getToken();
+                statement();
+            }
+        }
+        else if (m_tokenType == TokenType::IF)
+        {
+            getToken(TokenType::LEFT_BRACKET);
+            {
+                getToken();
+                expression();
+            }
+            checkToken(TokenType::RIGHT_BRACKET);
+            {
+                getToken();
+                statement();
+            }
+            getToken(TokenType::ELSE);
+            {
+                getToken();
+                statement();
+            }
+        }
+        else if (m_tokenType == TokenType::LABEL)
+        {
+            getToken(TokenType::COLON);
+        }
+        else if (m_tokenType == TokenType::GOTO)
+        {
+            getToken(TokenType::LABEL);
+
+            getToken(TokenType::SEMICOLON);
+        }
+        else if (m_tokenType == TokenType::BEGIN)
+        {
+            getToken();
+            statements();
+        }
+        else
+        {
+            expression();
+            checkToken(TokenType::SEMICOLON);
+        }
+    }
+
+    void statements()
+    {
+        while (m_tokenType != TokenType::END)
+        {
+            statement();
+            getToken();
+        }
+    }
+
+    void constant()
+    {
+        int isAddSubtraction = m_tokenType == TokenType::MINUS
+                            || m_tokenType == TokenType::PLUS;
+
+        int isConst = m_tokenType == TokenType::NUMBER
+                    && m_tokenType == TokenType::STRING_CONST;
+
+        if (isAddSubtraction)
+        {
+            getToken();
+
+            if (m_tokenType != TokenType::NUMBER)
+            {
+                throw std::runtime_error("[Parser]: expected number!");
+            }
+        }
+        else if (!isConst)
+        {
+            throw std::runtime_error("[Parser]: expected constant!");
+        }
+    }
+
+    void declarations()
+    {
+        auto isDeclaration = m_tokenType == TokenType::INT
+                            || m_tokenType == TokenType::STRING;
+
+        while (isDeclaration)
+        {
+            do
+            {
+                getToken(TokenType::IDENTIFIER);
+
+                getToken();
+
+                if (m_tokenType == TokenType::ASSIGN)
+                {
+                    getToken();
+                    constant();
+                    getToken();
+                }
+            }
+            while (m_tokenType == TokenType::COMMA);
+
+            checkToken(TokenType::SEMICOLON);
+            getToken();
+        }
+    }
+public:
+    Parser(const char *a_file)
+            :m_scanner(a_file)
+    {
+    }
+
+    void analyze()
+    {
+        getToken(TokenType::START);
+        getToken(TokenType::BEGIN);
+        {
+            getToken();
+            declarations();
+            statements();
+        }
+        getToken(TokenType::END);
+        getToken(TokenType::FINAL);
+    }
+};
 
 int main()
 {
